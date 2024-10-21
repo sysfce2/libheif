@@ -122,8 +122,10 @@ static void copy_security_limits(heif_security_limits* dst, const heif_security_
   dst->max_color_profile_size = src->max_color_profile_size;
   dst->max_memory_block_size = src->max_memory_block_size;
 
-  dst->max_iloc_items = src->max_iloc_items;
+  dst->max_components = src->max_components;
   dst->max_iloc_extents_per_item = src->max_iloc_extents_per_item;
+  dst->max_size_entity_group = src->max_size_entity_group;
+
   dst->max_children_per_box = src->max_children_per_box;
 }
 
@@ -913,8 +915,12 @@ Error HeifContext::interpret_heif_file()
 
 bool HeifContext::has_alpha(heif_item_id ID) const
 {
-  assert(is_image(ID));
-  auto img = m_all_images.find(ID)->second;
+  auto imgIter = m_all_images.find(ID);
+  if (imgIter == m_all_images.end()) {
+    return false;
+  }
+
+  auto img = imgIter->second;
 
   // --- has the image an auxiliary alpha image?
 

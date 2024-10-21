@@ -95,7 +95,7 @@ bool is_predefined_component_type(uint16_t type)
 {
   // check whether the component type can be mapped to heif_uncompressed_component_type and we have a name defined for
   // it in sNames_uncompressed_component_type.
-  return (type >= 0 && type <= component_type_max_valid);
+  return type <= component_type_max_valid;
 }
 
 static std::map<heif_uncompressed_component_type, const char*> sNames_uncompressed_component_type{
@@ -131,9 +131,31 @@ template <typename T> const char* get_name(T val, const std::map<T, const char*>
 
 Error Box_cmpd::parse(BitstreamRange& range, const heif_security_limits* limits)
 {
-  unsigned int component_count = range.read32();
+  uint32_t component_count = range.read32();
 
-  for (unsigned int i = 0; i < component_count && !range.error() && !range.eof(); i++) {
+  if (limits->max_components && component_count > limits->max_components) {
+    std::stringstream sstr;
+    sstr << "cmpd box should countain " << component_count << " components, but security limit is set to "
+         << limits->max_components << " components";
+
+    return {heif_error_Invalid_input,
+            heif_suberror_Security_limit_exceeded,
+            sstr.str()
+    };
+  }
+
+  for (unsigned int i = 0; i < component_count ; i++) {
+    if (range.eof()) {
+      std::stringstream sstr;
+      sstr << "cmpd box should countain " << component_count << " components, but box only contained "
+           << i << " components";
+
+      return {heif_error_Invalid_input,
+              heif_suberror_End_of_data,
+              sstr.str()
+      };
+    }
+
     Component component;
     component.component_type = range.read16();
     if (component.component_type >= 0x8000) {
@@ -199,7 +221,9 @@ Error Box_cmpd::write(StreamWriter& writer) const
 Error Box_uncC::parse(BitstreamRange& range, const heif_security_limits* limits)
 {
   parse_full_box_header(range);
+
   m_profile = range.read32();
+
   if (get_version() == 1) {
     if (m_profile == fourcc("rgb3")) {
       Box_uncC::Component component0 = {0, 8, component_format_unsigned, 0};
@@ -208,7 +232,8 @@ Error Box_uncC::parse(BitstreamRange& range, const heif_security_limits* limits)
       add_component(component1);
       Box_uncC::Component component2 = {2, 8, component_format_unsigned, 0};
       add_component(component2);
-    } else if ((m_profile == fourcc("rgba")) || (m_profile == fourcc("abgr"))) {
+    }
+    else if ((m_profile == fourcc("rgba")) || (m_profile == fourcc("abgr"))) {
       Box_uncC::Component component0 = {0, 8, component_format_unsigned, 0};
       add_component(component0);
       Box_uncC::Component component1 = {1, 8, component_format_unsigned, 0};
@@ -217,14 +242,25 @@ Error Box_uncC::parse(BitstreamRange& range, const heif_security_limits* limits)
       add_component(component2);
       Box_uncC::Component component3 = {3, 8, component_format_unsigned, 0};
       add_component(component3);
-    } else {
+    }
+    else {
         return Error{heif_error_Invalid_input, heif_suberror_Invalid_parameter_value, "Invalid component format"};
     }
   } else if (get_version() == 0) {
 
-    unsigned int component_count = range.read32();
+    uint32_t component_count = range.read32();
 
-    for (unsigned int i = 0; i < component_count && !range.error() && !range.eof(); i++) {
+    if (limits->max_components && component_count > limits->max_components) {
+      std::stringstream sstr;
+      sstr << "Number of image components (" << component_count << ") exceeds security limit ("
+           << limits->max_components << ")";
+
+      return {heif_error_Invalid_input,
+              heif_suberror_Security_limit_exceeded,
+              sstr.str()};
+    }
+
+    for (uint32_t i = 0; i < component_count && !range.error() && !range.eof(); i++) {
       Component component;
       component.component_index = range.read16();
       component.component_bit_depth = uint16_t(range.read8() + 1);
@@ -233,18 +269,18 @@ Error Box_uncC::parse(BitstreamRange& range, const heif_security_limits* limits)
       m_components.push_back(component);
 
       if (!is_valid_component_format(component.component_format)) {
-        return Error{heif_error_Invalid_input, heif_suberror_Invalid_parameter_value, "Invalid component format"};
+        return {heif_error_Invalid_input, heif_suberror_Invalid_parameter_value, "Invalid component format"};
       }
     }
 
     m_sampling_type = range.read8();
     if (!is_valid_sampling_mode(m_sampling_type)) {
-      return Error{heif_error_Invalid_input, heif_suberror_Invalid_parameter_value, "Invalid sampling mode"};
+      return {heif_error_Invalid_input, heif_suberror_Invalid_parameter_value, "Invalid sampling mode"};
     }
 
     m_interleave_type = range.read8();
     if (!is_valid_interleave_mode(m_interleave_type)) {
-      return Error{heif_error_Invalid_input, heif_suberror_Invalid_parameter_value, "Invalid interleave mode"};
+      return {heif_error_Invalid_input, heif_suberror_Invalid_parameter_value, "Invalid interleave mode"};
     }
 
     m_block_size = range.read8();
@@ -264,18 +300,22 @@ Error Box_uncC::parse(BitstreamRange& range, const heif_security_limits* limits)
 
     uint32_t num_tile_cols_minus_one = range.read32();
     uint32_t num_tile_rows_minus_one = range.read32();
-    if ((num_tile_cols_minus_one >= UINT32_MAX) || (num_tile_rows_minus_one >= UINT32_MAX)) {
-      std::stringstream sstr;
-      sstr << "Tiling size " << ((uint64_t)num_tile_cols_minus_one + 1) << " x " << ((uint64_t)num_tile_rows_minus_one + 1) << " exceeds the maximum allowed size "
-           << UINT32_MAX << " x " << UINT32_MAX;
-      return Error(heif_error_Memory_allocation_error,
-                   heif_suberror_Security_limit_exceeded,
-                   sstr.str());
-    }
-    m_num_tile_cols = num_tile_cols_minus_one + 1;
 
+    if (limits->max_number_of_tiles &&
+        static_cast<uint64_t>(num_tile_cols_minus_one) + 1 > limits->max_number_of_tiles / (static_cast<uint64_t>(num_tile_rows_minus_one) + 1)) {
+      std::stringstream sstr;
+      sstr << "Tiling size "
+           << ((uint64_t)num_tile_cols_minus_one + 1) << " x " << ((uint64_t)num_tile_rows_minus_one + 1)
+           << " exceeds the maximum allowed number " << limits->max_number_of_tiles << " set as security limit";
+      return {heif_error_Memory_allocation_error,
+              heif_suberror_Security_limit_exceeded,
+              sstr.str()};
+    }
+
+    m_num_tile_cols = num_tile_cols_minus_one + 1;
     m_num_tile_rows = num_tile_rows_minus_one + 1;
   }
+
   return range.get_error();
 }
 
@@ -411,7 +451,16 @@ Error Box_cmpC::parse(BitstreamRange& range, const heif_security_limits* limits)
   }
 
   m_compression_type = range.read32();
-  m_compressed_unit_type = range.read8();
+
+  uint8_t unit_type = range.read8();
+  if (unit_type > heif_cmpC_compressed_unit_type_image_pixel) {
+    return {heif_error_Invalid_input,
+            heif_suberror_Unsupported_parameter,
+            "Unsupported cmpC compressed unit type"};
+  };
+
+  m_compressed_unit_type = static_cast<heif_cmpC_compressed_unit_type>(unit_type);
+
   return range.get_error();
 }
 
@@ -438,6 +487,9 @@ Error Box_cmpC::write(StreamWriter& writer) const
 }
 
 
+static uint8_t unit_offset_bits_table[] = {0, 16, 24, 32, 64 };
+static uint8_t unit_size_bits_table[] = {8, 16, 24, 32, 64 };
+
 Error Box_icef::parse(BitstreamRange& range, const heif_security_limits* limits)
 {
   parse_full_box_header(range);
@@ -450,43 +502,64 @@ Error Box_icef::parse(BitstreamRange& range, const heif_security_limits* limits)
   uint8_t unit_size_code = (codes & 0b00011100) >> 2;
   uint32_t num_compressed_units = range.read32();
   uint64_t implied_offset = 0;
+
+  if (unit_offset_code > 4) {
+    return {heif_error_Usage_error, heif_suberror_Unsupported_parameter, "Unsupported icef unit offset code"};
+  }
+
+  if (unit_size_code > 4) {
+    return {heif_error_Usage_error, heif_suberror_Unsupported_parameter, "Unsupported icef unit size code"};
+  }
+
+  // --- precompute fields lengths
+
+  uint8_t unit_offset_bits = unit_offset_bits_table[unit_offset_code];
+  uint8_t unit_size_bits = unit_size_bits_table[unit_size_code];
+
+  // --- check if box is large enough for all the data
+
+  uint64_t data_size_bytes = static_cast<uint64_t>(num_compressed_units) * (unit_offset_bits + unit_size_bits) / 8;
+  if (data_size_bytes > range.get_remaining_bytes()) {
+    uint64_t contained_units = range.get_remaining_bytes() / ((unit_offset_bits + unit_size_bits) * 8);
+    std::stringstream sstr;
+    sstr << "icef box declares " << num_compressed_units << " units, but only " << contained_units
+         << " were contained in the file";
+    return {heif_error_Invalid_input,
+            heif_suberror_End_of_data,
+            sstr.str()};
+  }
+
+  // TODO: should we impose some security limit?
+
+  // --- read box content
+
+  m_unit_infos.resize(num_compressed_units);
+
   for (uint32_t r = 0; r < num_compressed_units; r++) {
     struct CompressedUnitInfo unitInfo;
     if (unit_offset_code == 0) {
       unitInfo.unit_offset = implied_offset;
-    } else if (unit_offset_code == 1) {
-      unitInfo.unit_offset = range.read16();
-    } else if (unit_offset_code == 2) {
-      unitInfo.unit_offset = range.read24();
-    } else if (unit_offset_code == 3) {
-      unitInfo.unit_offset = range.read32();
-    } else if (unit_offset_code == 4) {
-      unitInfo.unit_offset = range.read64();
     } else {
-      return Error(heif_error_Usage_error, heif_suberror_Unsupported_parameter, "Unsupported icef unit offset code");
+      unitInfo.unit_offset = range.read_uint(unit_offset_bits);
     }
-    if (unit_size_code == 0) {
-      unitInfo.unit_size = range.read8();
-    } else if (unit_size_code == 1) {
-      unitInfo.unit_size = range.read16();
-    } else if (unit_size_code == 2) {
-      unitInfo.unit_size = range.read24();
-    } else if (unit_size_code == 3) {
-      unitInfo.unit_size = range.read32();
-    } else if (unit_size_code == 4) {
-      unitInfo.unit_size = range.read64();
-    } else {
-      return Error(heif_error_Usage_error, heif_suberror_Unsupported_parameter, "Unsupported icef unit size code");
-    }
+
+    unitInfo.unit_size = range.read_uint(unit_size_bits);
+
     if (unitInfo.unit_size >= UINT64_MAX - implied_offset) {
-      return {heif_error_Invalid_input, heif_suberror_Invalid_parameter_value, "cumulative offsets too large for 64 bit file size"};
+      return {heif_error_Invalid_input,
+              heif_suberror_Invalid_parameter_value,
+              "cumulative offsets too large for 64 bit file size"};
     }
+
     implied_offset += unitInfo.unit_size;
+
     if (range.get_error() != Error::Ok) {
       return range.get_error();
     }
-    m_unit_infos.push_back(unitInfo);
+
+    m_unit_infos[r] = unitInfo;
   }
+
   return range.get_error();
 }
 

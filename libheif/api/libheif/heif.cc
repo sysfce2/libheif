@@ -512,6 +512,12 @@ const struct heif_security_limits* heif_get_global_security_limits()
 }
 
 
+const struct heif_security_limits* heif_get_disabled_security_limits()
+{
+  return &disabled_security_limits;
+}
+
+
 struct heif_security_limits* heif_context_get_security_limits(const struct heif_context* ctx)
 {
   if (!ctx) {
@@ -2231,8 +2237,7 @@ static const std::set<typename std::underlying_type<heif_color_primaries>::type>
 
 struct heif_error heif_nclx_color_profile_set_color_primaries(heif_color_profile_nclx* nclx, uint16_t cp)
 {
-  if (static_cast<std::underlying_type<heif_color_primaries>::type>(cp) < std::numeric_limits<std::underlying_type<heif_color_primaries>::type>::min() ||
-      static_cast<std::underlying_type<heif_color_primaries>::type>(cp) > std::numeric_limits<std::underlying_type<heif_color_primaries>::type>::max()) {
+  if (static_cast<std::underlying_type<heif_color_primaries>::type>(cp) > std::numeric_limits<std::underlying_type<heif_color_primaries>::type>::max()) {
     return Error(heif_error_Invalid_input, heif_suberror_Unknown_NCLX_color_primaries).error_struct(nullptr);
   }
 
@@ -2272,8 +2277,7 @@ static const std::set<typename std::underlying_type<heif_transfer_characteristic
 
 struct heif_error heif_nclx_color_profile_set_transfer_characteristics(struct heif_color_profile_nclx* nclx, uint16_t tc)
 {
-  if (static_cast<std::underlying_type<heif_color_primaries>::type>(tc) < std::numeric_limits<std::underlying_type<heif_transfer_characteristics>::type>::min() ||
-      static_cast<std::underlying_type<heif_color_primaries>::type>(tc) > std::numeric_limits<std::underlying_type<heif_transfer_characteristics>::type>::max()) {
+  if (static_cast<std::underlying_type<heif_color_primaries>::type>(tc) > std::numeric_limits<std::underlying_type<heif_transfer_characteristics>::type>::max()) {
     return Error(heif_error_Invalid_input, heif_suberror_Unknown_NCLX_transfer_characteristics).error_struct(nullptr);
   }
 
@@ -2309,8 +2313,7 @@ static const std::set<typename std::underlying_type<heif_matrix_coefficients>::t
 
 struct heif_error heif_nclx_color_profile_set_matrix_coefficients(struct heif_color_profile_nclx* nclx, uint16_t mc)
 {
-  if (static_cast<std::underlying_type<heif_color_primaries>::type>(mc) < std::numeric_limits<std::underlying_type<heif_matrix_coefficients>::type>::min() ||
-      static_cast<std::underlying_type<heif_color_primaries>::type>(mc) > std::numeric_limits<std::underlying_type<heif_matrix_coefficients>::type>::max()) {
+  if (static_cast<std::underlying_type<heif_color_primaries>::type>(mc) > std::numeric_limits<std::underlying_type<heif_matrix_coefficients>::type>::max()) {
     return Error(heif_error_Invalid_input, heif_suberror_Unknown_NCLX_matrix_coefficients).error_struct(nullptr);
   }
 
@@ -3708,14 +3711,9 @@ struct heif_error heif_context_encode_thumbnail(struct heif_context* ctx,
 
 
   if (out_image_handle) {
-    if (thumbnail_image) {
-      *out_image_handle = new heif_image_handle;
-      (*out_image_handle)->image = thumbnail_image;
-      (*out_image_handle)->context = ctx->context;
-    }
-    else {
-      *out_image_handle = nullptr;
-    }
+    *out_image_handle = new heif_image_handle;
+    (*out_image_handle)->image = thumbnail_image;
+    (*out_image_handle)->context = ctx->context;
   }
 
   return heif_error_success;

@@ -410,7 +410,7 @@ enum heif_compression_format
    */
   heif_compression_AV1 = 4,
   /**
-   * VVC compression. (Currently unused in libheif.)
+   * VVC compression.
    *
    * The compression format is defined in ISO/IEC 23090-3. This is equivalent to H.266.
    *
@@ -1136,8 +1136,10 @@ struct heif_security_limits {
   uint32_t max_color_profile_size;
   uint64_t max_memory_block_size;
 
-  uint32_t max_iloc_items;
+  uint32_t max_components;
+
   uint32_t max_iloc_extents_per_item;
+  uint32_t max_size_entity_group;
 
   uint32_t max_children_per_box; // for all boxes that are not covered by other limits
 };
@@ -1146,6 +1148,10 @@ struct heif_security_limits {
 // These global limits cannot be changed, but you can override the limits for a specific heif_context.
 LIBHEIF_API
 const struct heif_security_limits* heif_get_global_security_limits();
+
+// Returns a set of fully disabled security limits. Use with care and only after user confirmation.
+LIBHEIF_API
+const struct heif_security_limits* heif_get_disabled_security_limits();
 
 // Returns the security limits for a heif_context.
 // By default, the limits are set to the global limits, but you can change them in the returned object.

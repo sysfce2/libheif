@@ -1336,11 +1336,10 @@ Error Box_iloc::parse(BitstreamRange& range, const heif_security_limits* limits)
   }
 
   // Sanity check. (This might be obsolete now as we check for range.error() below).
-  auto max_iloc_items = limits->max_iloc_items;
-  if (max_iloc_items && item_count > max_iloc_items) {
+  if (limits->max_items && item_count > limits->max_items) {
     std::stringstream sstr;
     sstr << "iloc box contains " << item_count << " items, which exceeds the security limit of "
-         << max_iloc_items << " items.";
+         << limits->max_items << " items.";
 
     return Error(heif_error_Memory_allocation_error,
                  heif_suberror_Security_limit_exceeded,
@@ -2342,9 +2341,9 @@ std::string Box_iprp::dump(Indent& indent) const
 }
 
 
-int Box_ipco::find_or_append_child_box(const std::shared_ptr<Box>& box)
+uint32_t Box_ipco::find_or_append_child_box(const std::shared_ptr<Box>& box)
 {
-  for (int i = 0; i < (int) m_children.size(); i++) {
+  for (uint32_t i = 0; i < (uint32_t) m_children.size(); i++) {
     if (Box::equal(m_children[i], box)) {
       return i;
     }
@@ -2900,6 +2899,16 @@ Error Box_ipma::parse(BitstreamRange& range, const heif_security_limits* limits)
   }
 
   uint32_t entry_cnt = range.read32();
+
+  if (limits->max_items && entry_cnt > limits->max_items) {
+    std::stringstream sstr;
+    sstr << "ipma box wants to define properties for " << entry_cnt
+         << " items, but the security limit has been set to " << limits->max_items << " items";
+    return {heif_error_Invalid_input,
+            heif_suberror_Security_limit_exceeded,
+            sstr.str()};
+  }
+
   for (uint32_t i = 0; i < entry_cnt && !range.error() && !range.eof(); i++) {
     Entry entry;
     if (get_version() < 1) {
@@ -3767,17 +3776,26 @@ Error Box_EntityToGroup::parse(BitstreamRange& range, const heif_security_limits
 
   group_id = range.read32();
   uint32_t nEntities = range.read32();
+
+  if (nEntities > range.get_remaining_bytes() / 4) {
+    std::stringstream sstr;
+    size_t maxEntries = range.get_remaining_bytes() / 4;
+    sstr << "entity group box should contain " << nEntities << " entities, but we can only read " << maxEntries << " entities.";
+
+    return {heif_error_Invalid_input,
+            heif_suberror_End_of_data,
+            sstr.str()};
+  }
+
+  if (limits->max_size_entity_group && nEntities > limits->max_size_entity_group) {
+    std::stringstream sstr;
+    sstr << "entity group box contains " << nEntities << " entities, but the security limit is set to " << limits->max_size_entity_group << " entities.";
+
+  }
+
+  entity_ids.resize(nEntities);
   for (uint32_t i = 0; i < nEntities; i++) {
-    if (range.eof()) {
-      std::stringstream sstr;
-      sstr << "entity group box should contain " << nEntities << " entities, but we can only read " << i << " entities.";
-
-      return {heif_error_Invalid_input,
-              heif_suberror_End_of_data,
-              sstr.str()};
-    }
-
-    entity_ids.push_back(range.read32());
+    entity_ids[i] = range.read32();
   }
 
   return Error::Ok;
